@@ -1,5 +1,6 @@
 #include <cstdio>
 #include <pcap.h>
+#include <string>
 #include "ethhdr.h"
 #include "arphdr.h"
 
@@ -147,14 +148,14 @@ int main(int argc, char* argv[]) {
 		puts("Timeout occurred.");
 	}
 	
-	// printf("%s\n", respacket->eth_.dmac_.ToString().c_str());
-	// printf("%s\n", respacket->eth_.smac_.ToString().c_str());
+	//printf("victim res eth dmac: %s\n", respacket->eth_.dmac_.ToString().c_str());
+	// printf("victim res eth smac: %s\n", respacket->eth_.smac_.ToString().c_str());
 	
 	// arp spoof to victim
-	while(1) {
+	 while(1) {
 		EthArpPacket atkpacket;
 
-		atkpacket.eth_.dmac_ = respacket->eth_.dmac_;
+		atkpacket.eth_.dmac_ = respacket->eth_.smac_;
 		atkpacket.eth_.smac_ = Mac(macaddr);
 		atkpacket.eth_.type_ = htons(EthHdr::Arp);
 
